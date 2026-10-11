@@ -1,0 +1,22 @@
+version: 2
+
+seeds:
+  - name: cities
+    description: Operating cities (reference data, slowly changing, managed in git).
+    columns:
+      - name: city_code
+        tests: [unique, not_null]
+  - name: vehicle_types
+    description: Vehicle catalogue with tariff card.
+    columns:
+      - name: vehicle_type
+        tests: [unique, not_null]
+  - name: cancellation_reasons
+    description: Maps every cancellation reason to the funnel stage and the team that owns fixing it.
+    columns:
+      - name: cancellation_reason
+        tests: [unique, not_null]
+      - name: stage
+        tests:
+          - accepted_values:
+              values: ["before_assignment", "after_assignment"]

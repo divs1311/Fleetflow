@@ -1,0 +1,50 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Raw zone of the lake: typed Parquet landed by the Kafka consumer (events) and the
+      batch API extract (master data). Read in place by DuckDB (ELT): nothing is
+      transformed before it is landed.
+    tables:
+      - name: trip_events
+        description: Trip lifecycle events, hive-partitioned by event_date (IST) and city. At-least-once, may contain duplicates and late arrivals.
+        meta:
+          external_location: "read_parquet('{{ env_var('PORTERFLOW_DATA_DIR', '../../data') }}/lake/raw/trip_events/*/*/*.parquet', hive_partitioning = true, union_by_name = true)"
+        loaded_at_field: _loaded_at_utc
+        columns:
+          - name: event_id
+            tests: [not_null]
+          - name: event_type
+            tests:
+              - accepted_values:
+                  values: ["trip_booked", "driver_assigned", "trip_picked_up", "trip_delivered", "trip_cancelled"]
+      - name: driver_sessions
+        description: Driver login/logout events, hive-partitioned by event_date (IST) and city.
+        meta:
+          external_location: "read_parquet('{{ env_var('PORTERFLOW_DATA_DIR', '../../data') }}/lake/raw/driver_sessions/*/*/*.parquet', hive_partitioning = true, union_by_name = true)"
+        columns:
+          - name: event_id
+            tests: [not_null]
+      - name: master_drivers
+        description: Incremental extracts of the driver master API, one partition per extract_date.
+        meta:
+          external_location: "read_parquet('{{ env_var('PORTERFLOW_DATA_DIR', '../../data') }}/lake/raw/master/drivers/*/*.parquet', hive_partitioning = true)"
+        columns:
+          - name: driver_id
+            tests: [not_null]
+      - name: master_vehicles
+        description: Incremental extracts of the vehicle master API, one partition per extract_date.
+        meta:
+          external_location: "read_parquet('{{ env_var('PORTERFLOW_DATA_DIR', '../../data') }}/lake/raw/master/vehicles/*/*.parquet', hive_partitioning = true)"
+        columns:
+          - name: vehicle_id
+            tests: [not_null]
+
+  - name: curated
+    description: Datasets produced by the Spark job (big-data layer) in the lake.
+    tables:
+      - name: driver_hourly_utilisation
+        description: Per driver per IST hour online seconds, busy seconds and utilisation (PySpark).
+        meta:
+          external_location: "read_parquet('{{ env_var('PORTERFLOW_DATA_DIR', '../../data') }}/lake/curated/driver_hourly_utilisation/*/*/*.parquet', hive_partitioning = true)"

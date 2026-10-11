@@ -1,0 +1,10 @@
+data/
+**/__pycache__/
+**/*.pyc
+.git/
+.github/
+docs/
+tests/
+dbt/porterflow/target/
+dbt/porterflow/logs/
+.env

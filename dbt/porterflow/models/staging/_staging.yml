@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: stg_trip_events
+    description: One row per trip-event message as received (duplicates still present). Typed, renamed, with simple flags.
+    columns:
+      - name: event_id
+        description: Producer-generated id; identical for redelivered copies of the same event.
+        tests: [not_null]
+      - name: trip_id
+        tests: [not_null]
+      - name: city_code
+        tests:
+          - relationships: {to: ref('cities'), field: city_code}
+      - name: lat
+        description: GPS latitude at the event; NULL when the phone had no fix.
+        tests:
+          - null_share_below: {max_share: 0.05}
+      - name: is_late_arrival
+        description: True when the app uploaded the event more than 1 hour after it happened.
+
+  - name: stg_driver_sessions
+    description: One row per driver login/logout message as received.
+    columns:
+      - name: event_id
+        tests: [not_null]
+      - name: event_type
+        tests:
+          - accepted_values: {values: ["driver_login", "driver_logout"]}
+
+  - name: stg_master_drivers
+    description: Every driver record version ever extracted from the master-data API (change log).
+    columns:
+      - name: driver_id
+        tests: [not_null]
+      - name: status
+        tests:
+          - accepted_values: {values: ["active", "inactive"]}
+
+  - name: stg_master_vehicles
+    description: Every vehicle record version ever extracted from the master-data API.
+    columns:
+      - name: vehicle_id
+        tests: [not_null]
+      - name: vehicle_type
+        tests:
+          - relationships: {to: ref('vehicle_types'), field: vehicle_type}

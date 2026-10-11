@@ -1,0 +1,50 @@
+name: porterflow
+version: "1.0.0"
+config-version: 2
+profile: porterflow
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+clean-targets: ["target", "dbt_packages", "logs"]
+
+flags:
+  send_anonymous_usage_stats: false
+  partial_parse: true
+
+vars:
+  # Business date being processed; Airflow passes {{ ds }}. Defaults to today for ad-hoc runs.
+  run_date: null
+  # Incremental models re-read this many hours of already-loaded data (safety overlap);
+  # the anti-join / delete+insert makes the overlap idempotent.
+  late_lookback_hours: 2
+  # Straight-line km -> road km
+  road_factor: 1.35
+  # Delivered distance implying a speed above this is a GPS/odometer glitch
+  max_plausible_speed_kmph: 100
+
+models:
+  porterflow:
+    +persist_docs: {relation: true, columns: true}
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +schema: intermediate
+    marts:
+      +schema: marts
+      +materialized: table
+
+snapshots:
+  porterflow:
+    +target_schema: snapshots
+
+seeds:
+  porterflow:
+    +schema: reference
+
+tests:
+  porterflow:
+    +store_failures: false

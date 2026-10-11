@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install pipeline + Airflow (with the official constraints)
+        run: |
+          pip install "apache-airflow==2.10.5" -r requirements/pipeline.txt -r requirements/dev.txt \
+            --constraint docker/airflow/constraints-2.10.5-3.11.txt
+      - name: Install dbt in its own virtualenv
+        run: |
+          python -m venv /tmp/dbt-venv
+          /tmp/dbt-venv/bin/pip install -r requirements/dbt.lock.txt
+      - name: DAG imports cleanly
+        env:
+          AIRFLOW_HOME: /tmp/airflow
+          AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
+          AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          airflow db migrate > /dev/null
+          python -c "from airflow.models import DagBag; b = DagBag(include_examples=False); assert not b.import_errors, b.import_errors; print(list(b.dags))"
+      - name: dbt parse
+        working-directory: dbt/porterflow
+        env:
+          DBT_PROFILES_DIR: .
+        run: /tmp/dbt-venv/bin/dbt parse
+      - name: Unit tests
+        run: python -m pytest tests/unit -q
+      - name: End-to-end test (simulator -> lake -> Spark -> dbt -> serving)
+        env:
+          DBT_EXECUTABLE: /tmp/dbt-venv/bin/dbt
+        run: python -m pytest tests/integration -q
+      - name: Compose file is valid
+        run: docker compose config --quiet

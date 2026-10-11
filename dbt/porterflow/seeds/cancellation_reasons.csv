@@ -1,0 +1,12 @@
+cancellation_reason,cancelled_by,stage,owner_team,is_controllable
+booked_by_mistake,customer,before_assignment,product,false
+long_wait_for_assignment,customer,before_assignment,supply_ops,true
+no_driver_found,system,before_assignment,supply_ops,true
+driver_too_far,customer,after_assignment,dispatch,true
+changed_plans,customer,after_assignment,product,false
+found_alternative,customer,after_assignment,pricing,true
+driver_asked_extra_payment,customer,after_assignment,driver_quality,true
+pickup_location_unreachable,driver,after_assignment,dispatch,true
+driver_personal_reason,driver,after_assignment,driver_quality,true
+vehicle_breakdown,driver,after_assignment,fleet_ops,false
+customer_unreachable,driver,after_assignment,product,false

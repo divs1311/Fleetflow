@@ -1,0 +1,152 @@
+version: 2
+
+models:
+  - name: dim_city
+    description: Operating cities.
+    columns:
+      - name: city_code
+        tests: [unique, not_null]
+
+  - name: dim_vehicle
+    description: SCD Type 1 vehicle dimension with tariff attributes.
+    columns:
+      - name: vehicle_id
+        tests: [unique, not_null]
+      - name: vehicle_type
+        tests:
+          - not_null
+          - relationships: {to: ref('vehicle_types'), field: vehicle_type}
+
+  - name: dim_driver
+    description: >
+      SCD Type 2 driver dimension from the dbt snapshot. One row per driver version;
+      join facts on driver_id and event time within [valid_from_utc, valid_to_utc).
+    columns:
+      - name: driver_sk
+        description: Surrogate key of the driver version (dbt_scd_id).
+        tests: [unique, not_null]
+      - name: driver_id
+        tests: [not_null]
+      - name: vehicle_type
+        tests:
+          - relationships: {to: ref('vehicle_types'), field: vehicle_type}
+      - name: city_code
+        tests:
+          - relationships: {to: ref('dim_city'), field: city_code}
+
+  - name: dim_date
+    description: Calendar (IST dates).
+    columns:
+      - name: date_day
+        tests: [unique, not_null]
+
+  - name: fct_trips
+    description: >
+      Accumulating-snapshot fact. Grain: one row per trip. Rebuilt per trip whenever a new event
+      for it lands, so late events move trips from in_progress to completed/cancelled.
+    columns:
+      - name: trip_id
+        tests: [unique, not_null]
+      - name: city_code
+        tests:
+          - not_null
+          - relationships: {to: ref('dim_city'), field: city_code}
+      - name: booked_date_ist
+        tests:
+          - not_null
+          - relationships: {to: ref('dim_date'), field: date_day}
+      - name: trip_status
+        tests:
+          - not_null
+          - accepted_values: {values: ["completed", "cancelled", "in_progress"]}
+      - name: cancelled_by
+        tests:
+          - accepted_values: {values: ["customer", "driver", "system"]}
+      - name: cancellation_reason
+        tests:
+          - relationships: {to: ref('cancellation_reasons'), field: cancellation_reason}
+          - not_null_where: {condition: "trip_status = 'cancelled'"}
+      - name: driver_sk
+        description: SCD2 driver version valid when the trip was assigned.
+        tests:
+          - relationships: {to: ref('dim_driver'), field: driver_sk}
+          - not_null_where: {condition: "driver_id is not null"}
+      - name: vehicle_id
+        tests:
+          - relationships: {to: ref('dim_vehicle'), field: vehicle_id}
+      - name: fare_amount
+        tests:
+          - non_negative
+          - not_null_where: {condition: "trip_status = 'completed'"}
+      - name: dead_km
+        description: Empty distance driven to the pickup (straight line x road factor); NULL when GPS was missing.
+        tests:
+          - non_negative
+          - value_between: {min_value: 0, max_value: 100}
+      - name: distance_km
+        description: Loaded distance with GPS/odometer glitches removed (NULL when implausible).
+        tests:
+          - non_negative
+      - name: time_to_assign_sec
+        tests:
+          - value_between: {min_value: 0, max_value: 3600}
+
+  - name: fct_driver_shifts
+    description: One row per driver login with its logout (missing logouts capped and flagged).
+    columns:
+      - name: shift_id
+        tests: [unique, not_null]
+      - name: online_minutes
+        tests:
+          - value_between: {min_value: 0, max_value: 1440}
+
+  - name: fct_driver_hourly_utilisation
+    description: Driver x IST hour utilisation computed by the PySpark job.
+    tests:
+      - unique_combination_of_columns:
+          columns: ["driver_id", "activity_date_ist", "hour_of_day"]
+    columns:
+      - name: utilisation
+        tests:
+          - value_between: {min_value: 0, max_value: 1}
+      - name: online_seconds
+        tests:
+          - value_between: {min_value: 0, max_value: 3600.5}
+
+  - name: agg_city_daily
+    description: Daily ops scorecard per city (completion, cancellations, GMV, dead km, utilisation).
+    tests:
+      - unique_combination_of_columns:
+          columns: ["booked_date_ist", "city_code"]
+    columns:
+      - name: completion_rate
+        tests:
+          - value_between: {min_value: 0, max_value: 1}
+      - name: fleet_utilisation
+        tests:
+          - value_between: {min_value: 0, max_value: 1}
+
+  - name: agg_driver_daily
+    description: Driver x day productivity (trips, earnings, busy vs online time, dead km).
+    tests:
+      - unique_combination_of_columns:
+          columns: ["driver_id", "activity_date_ist"]
+    columns:
+      - name: utilisation
+        tests:
+          - value_between: {min_value: 0, max_value: 1}
+
+  - name: agg_cancellations
+    description: Cancellations by reason, stage and owning team.
+    columns:
+      - name: owner_team
+        tests:
+          - not_null
+          - accepted_values:
+              values: ["product", "supply_ops", "dispatch", "pricing", "driver_quality", "fleet_ops"]
+
+  - name: agg_city_hourly
+    description: Demand (bookings) vs supply (drivers online, utilisation) by city and IST hour.
+    tests:
+      - unique_combination_of_columns:
+          columns: ["activity_date_ist", "hour_of_day", "city_code"]

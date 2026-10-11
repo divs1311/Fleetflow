@@ -1,0 +1,227 @@
+# PorterFlow: the whole platform with one command.
+#
+#   cp .env.example .env    (Linux: set AIRFLOW_UID=$(id -u) so files in ./data belong to you)
+#   docker compose up -d --build
+#
+# Airflow  http://localhost:8080  (airflow / airflow)   Dashboard  http://localhost:8501
+# Redpanda Console  http://localhost:8085               MinIO  http://localhost:9001 (porterflow / porterflow-secret)
+# Master-data API docs  http://localhost:8000/docs
+#
+# On first start the DAG is unpaused and catches up PORTERFLOW_BACKFILL_DAYS simulated days,
+# one at a time (about 1-2 minutes per day). The dashboard fills in after the first run.
+
+x-airflow-env: &airflow-env
+  AIRFLOW__CORE__EXECUTOR: LocalExecutor
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+  AIRFLOW__CORE__FERNET_KEY: ""
+  AIRFLOW__CORE__DAGS_FOLDER: /opt/porterflow/dags
+  AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__CORE__PARALLELISM: "8"
+  AIRFLOW__WEBSERVER__SECRET_KEY: porterflow-local-only
+  AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
+  AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+  # pipeline settings (src/porterflow/config.py)
+  PORTERFLOW_DATA_DIR: /opt/porterflow/data
+  PORTERFLOW_WAREHOUSE_PATH: /opt/porterflow/data/warehouse/porterflow.duckdb
+  PORTERFLOW_START_DATE: ${PORTERFLOW_START_DATE:-2026-09-01}
+  PORTERFLOW_BACKFILL_DAYS: ${PORTERFLOW_BACKFILL_DAYS:-14}
+  PORTERFLOW_LATE_LOOKBACK_DAYS: "3"
+  SIM_SEED: ${SIM_SEED:-42}
+  SIM_TRIPS_PER_DAY: ${SIM_TRIPS_PER_DAY:-20000}
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  MASTER_API_URL: http://master-api:8000
+  MASTER_API_KEY: ${MASTER_API_KEY:-porterflow-dev-key}
+  DBT_PROJECT_DIR: /opt/porterflow/dbt/porterflow
+  DBT_PROFILES_DIR: /opt/porterflow/dbt/porterflow
+  DBT_TARGET_PATH: /opt/porterflow/data/state/dbt/target
+  DBT_LOG_PATH: /opt/porterflow/data/state/dbt/logs
+  PORTERFLOW_SPARK_JOB: /opt/porterflow/src/porterflow/spark_jobs/driver_utilisation.py
+  SPARK_MASTER: local[2]
+  PORTERFLOW_EXPORT_TARGET: ${PORTERFLOW_EXPORT_TARGET:-s3}
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_BUCKET: porterflow-gold
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-porterflow}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-porterflow-secret}
+  AWS_REGION: us-east-1
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  image: porterflow-airflow:1.0
+  environment:
+    <<: *airflow-env
+  user: "${AIRFLOW_UID:-50000}:0"
+  volumes:
+    - ./dags:/opt/porterflow/dags
+    - ./src:/opt/porterflow/src
+    - ./dbt:/opt/porterflow/dbt
+    - ./data:/opt/porterflow/data
+    - airflow-logs:/opt/airflow/logs
+  depends_on: &airflow-deps
+    postgres:
+      condition: service_healthy
+    redpanda:
+      condition: service_healthy
+    master-api:
+      condition: service_healthy
+    minio:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v3.12.0
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "8085:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-porterflow}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-porterflow-secret}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  master-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: porterflow-master-api:1.0
+    environment:
+      MASTER_API_KEY: ${MASTER_API_KEY:-porterflow-dev-key}
+      API_FAILURE_RATE: "0.1"
+      SIM_SEED: ${SIM_SEED:-42}
+      SIM_TRIPS_PER_DAY: ${SIM_TRIPS_PER_DAY:-20000}
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  airflow-init:
+    <<: *airflow-common
+    user: "0:0"
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/porterflow/data /opt/airflow/logs
+        chown -R "${AIRFLOW_UID:-50000}:0" /opt/porterflow/data /opt/airflow/logs
+        exec /entrypoint airflow version
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-airflow}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-deps
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      <<: *airflow-deps
+      airflow-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard/Dockerfile
+    image: porterflow-dashboard:1.0
+    volumes:
+      - ./data:/data:ro
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redpanda-data:
+  minio-data:
+  airflow-logs:

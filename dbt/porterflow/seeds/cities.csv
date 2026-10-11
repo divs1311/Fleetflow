@@ -1,0 +1,7 @@
+city_code,city_name,state,region,city_tier,center_lat,center_lng,service_radius_km
+BLR,Bengaluru,Karnataka,South,1,12.9716,77.5946,17
+MUM,Mumbai,Maharashtra,West,1,19.0760,72.8777,18
+DEL,Delhi NCR,Delhi,North,1,28.6139,77.2090,24
+HYD,Hyderabad,Telangana,South,1,17.3850,78.4867,17
+PUN,Pune,Maharashtra,West,1,18.5204,73.8567,13
+CHE,Chennai,Tamil Nadu,South,1,13.0827,80.2707,15

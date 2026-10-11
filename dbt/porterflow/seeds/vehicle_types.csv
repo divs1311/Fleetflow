@@ -1,0 +1,6 @@
+vehicle_type,vehicle_category,display_name,capacity_kg,base_fare_inr,per_km_inr
+two_wheeler,two_wheeler,2 Wheeler,20,45,9
+three_wheeler,three_wheeler,3 Wheeler,500,120,16
+tata_ace,truck,Tata Ace (7 ft),750,250,22
+pickup_8ft,truck,Pickup (8 ft),1250,400,28
+truck_14ft,truck,Truck (14 ft),3500,900,45

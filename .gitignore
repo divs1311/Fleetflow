@@ -1,0 +1,17 @@
+# generated data (rebuilt by the pipeline)
+data/*
+!data/.gitkeep
+# python / tooling
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+# dbt
+dbt/porterflow/target/
+dbt/porterflow/logs/
+dbt/porterflow/dbt_packages/
+# local env
+.env
+.DS_Store
+dbt/porterflow/.user.yml

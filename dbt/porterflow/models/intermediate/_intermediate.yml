@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: int_trip_events
+    description: >
+      Deduplicated trip events (first copy of each event_id). Incremental on load time with a
+      safety overlap and an anti-join, so late events are absorbed and re-runs are idempotent.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+      - name: event_type
+        tests:
+          - accepted_values:
+              values: ["trip_booked", "driver_assigned", "trip_picked_up", "trip_delivered", "trip_cancelled"]
+      - name: event_ts_utc
+        tests: [not_null]
+
+  - name: int_driver_sessions
+    description: Deduplicated driver login/logout events.
+    columns:
+      - name: event_id
+        tests: [unique, not_null]
+
+  - name: int_drivers_current
+    description: Latest state of every driver as of the run date (input to the SCD2 snapshot).
+    columns:
+      - name: driver_id
+        tests: [unique, not_null]
+      - name: vehicle_id
+        tests:
+          - not_null
+          - relationships: {to: ref('int_vehicles_current'), field: vehicle_id}
+
+  - name: int_vehicles_current
+    description: Latest state of every vehicle as of the run date.
+    columns:
+      - name: vehicle_id
+        tests: [unique, not_null]

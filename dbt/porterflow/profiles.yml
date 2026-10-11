@@ -1,0 +1,8 @@
+porterflow:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('PORTERFLOW_WAREHOUSE_PATH', '../../data/warehouse/porterflow.duckdb') }}"
+      schema: main
+      threads: 1
